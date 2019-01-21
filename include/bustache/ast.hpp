@@ -73,7 +73,120 @@ namespace bustache { namespace ast
             BUSTACHE_AST_CONTENT(Zz_BUSTACHE_VARIANT_MEMBER, )
         };
     public:
-        Zz_BUSTACHE_VARIANT_DECL(content, BUSTACHE_AST_CONTENT, true)
+        //Zz_BUSTACHE_VARIANT_DECL(content, BUSTACHE_AST_CONTENT, true)
+        struct switcher
+        {
+            template<class T, class Visitor>
+            static auto common_ret(T* data, Visitor& v) ->
+                decltype(BUSTACHE_AST_CONTENT(Zz_BUSTACHE_VARIANT_RET,) throw bad_variant_access());
+            template<class T, class Visitor>
+            static auto visit(unsigned which, T* data, Visitor& v) ->
+                decltype(common_ret(data, v))
+            {
+                switch (which)
+                {
+                BUSTACHE_AST_CONTENT(Zz_BUSTACHE_VARIANT_SWITCH,)
+                default: throw bad_variant_access();
+                }
+            }
+            BUSTACHE_AST_CONTENT(Zz_BUSTACHE_VARIANT_INDEX,)
+        };
+        private:
+        void invalidate() noexcept
+        {
+            if (valid())
+            {
+                detail::dtor_visitor v;
+                switcher::visit(_which, data(), v);
+                _which = ~0u;
+            }
+        }
+        template<class T>
+        void do_init(T& other)
+        {
+            detail::ctor_visitor v{_storage};
+            switcher::visit(other._which, other.data(), v);
+        }
+        template<class T>
+        void do_assign(T& other)
+        {
+            if (_which == other._which)
+            {
+                detail::assign_visitor v{_storage};
+                switcher::visit(other._which, other.data(), v);
+            }
+            else
+            {
+                invalidate();
+                if (other.valid())
+                {
+                    do_init(other);
+                    _which = other._which;
+                }
+            }
+        }
+        public:
+        unsigned which() const noexcept
+        {
+            return _which;
+        }
+        bool valid() const noexcept
+        {
+            return _which != ~0u;
+        }
+        void* data() noexcept
+        {
+            return _storage;
+        }
+        void const* data() const noexcept
+        {
+            return _storage;
+        }
+        content(content&& other) noexcept(true) : _which(other._which)
+        {
+            do_init(other);
+        }
+        content(content const& other) : _which(other._which)
+        {
+            do_init(other);
+        }
+        template<class T, class U = decltype(type_matcher::match(std::declval<T>()))>
+        content(T&& other) noexcept(std::is_nothrow_constructible<U, T>::value)
+          : _which(switcher::index(detail::type<U>{}))
+        {
+            new(_storage) U(std::forward<T>(other));
+        }
+        ~content()
+        {
+            if (valid())
+            {
+                detail::dtor_visitor v;
+                switcher::visit(_which, data(), v);
+            }
+        }
+        template<class T, class U = decltype(type_matcher::match(std::declval<T>()))>
+        U& operator=(T&& other) noexcept(detail::noexcept_ctor_assign<U, T>::value)
+        {
+            if (switcher::index(detail::type<U>{}) == _which)
+                return *static_cast<U*>(data()) = std::forward<T>(other);
+            else
+            {
+                invalidate();
+                auto p = new(_storage) U(std::forward<T>(other));
+                _which = switcher::index(detail::type<U>{});
+                return *p;
+            }
+        }
+        content& operator=(content&& other) noexcept(true)
+        {
+            do_assign(other);
+            return *this;
+        }
+        content& operator=(content const& other)
+        {
+            do_assign(other);
+            return *this;
+        }
 
         content() noexcept : _which(0) {}
     };
